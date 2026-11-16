@@ -1,0 +1,29 @@
+# Datos: nada con rostros entra al repositorio.
+# De la carpeta datos/ solo se versionan el README, las anotaciones y el manifiesto.
+datos/*
+!datos/README.md
+!datos/anotaciones/
+!datos/manifiesto.csv
+
+# Videos, en cualquier carpeta
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+
+# Salidas que genera el sistema al correr (bitácoras, capturas, calibraciones)
+salidas/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Sistema operativo y editores
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

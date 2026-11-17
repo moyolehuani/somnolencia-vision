@@ -41,6 +41,12 @@ Cuando una decisión cambie, se edita su renglón, se anota la fecha y se avisa 
 | D25 | Calibración en dos pasos: ojos abiertos y ojos cerrados | Provisional | Frentes 1 y 2 |
 | D26 | Qué uso se le da al dataset de distracción de Kaggle | **Pendiente** | Equipo, tras inventariarlo |
 | D27 | Los cuatro integrantes aceptan ser grabados y aparecer en el reporte y en el video | Tomada | Cada integrante |
+| D28 | La apertura de ojos se mide con la razón entre bordes verticales y horizontales | Tomada | Equipo |
+| D29 | Cómo arranca el sistema con un video que no trae calibración | **Pendiente** | Profesores y equipo |
+| D30 | PERCLOS durante los primeros 30 s de la sesión | Provisional | Frente 4 |
+| D31 | Medida de apertura de la boca | **Pendiente** | Frente 3 |
+| D32 | La plantilla del rostro usa solo la parte de arriba de la cara | Provisional | Frente 1 |
+| D33 | La iluminación se mide en la parte de arriba del rostro y se corrige en todo el rostro | Provisional | Frente 2 |
 
 ## Detalle de las decisiones tomadas y provisionales
 
@@ -121,7 +127,29 @@ Los videos muestran rostros del equipo. Se conservan hasta que se asiente la cal
 
 ### D25. Calibración en dos pasos
 
-Pedir también dos segundos con los ojos cerrados da la referencia de "cerrado" de esa persona y permite ubicar las filas de los ojos sin que las cejas estorben. Cuesta dos segundos más al inicio. Si en las pruebas resulta innecesario, se regresa a un solo paso.
+Pedir también dos segundos con los ojos cerrados da la referencia de "cerrado" de esa persona, que junto con la de "abierto" convierte la medida de ojos en una apertura entre 0 y 1. Cuesta dos segundos más al inicio. Si en las pruebas resulta innecesario, se regresa a un solo paso y se usa la referencia general de `config.py`.
+
+### D28. Medida de ojos
+
+Decidida el 16 de noviembre, con datos. El diseño inicial medía la separación entre los picos del perfil del gradiente vertical. Se probó con 84 recortes de ojos de Kaggle y no separó abiertos de cerrados mejor que el azar.
+
+Se compararon otras medidas con la mitad de las imágenes y se eligió la razón entre bordes verticales y horizontales alrededor de la banda más oscura del ojo. Con la otra mitad dio F1 de 0.88, y 0.89 al intercambiar las mitades. Después se corrió con el dataset completo (1452 imágenes) y dio 0.86 y 0.84, debajo de la meta de 0.90 pero estable. Usa los mismos filtros de la práctica 5. Explicación en `algoritmos_y_modelos.md`.
+
+### D30. PERCLOS al inicio
+
+Mientras la sesión lleva menos de 30 s, PERCLOS se calcula sobre el tiempo transcurrido, y no se reporta antes de 10 s. La consecuencia es que al principio es nervioso: a los 11 s de sesión, un cierre de 1 s ya da 9% y dispara el aviso. La alternativa es no reportar PERCLOS hasta tener 30 s completos, cambiando `PERCLOS_TIEMPO_MINIMO_S` a 30. Queda provisional hasta verlo en vivo.
+
+### D32. Plantilla sin la boca
+
+La plantilla con la que se sigue el rostro usa el 65% superior de la caja: frente, ojos y nariz. Si incluyera la boca, un bostezo haría que el rostro dejara de parecerse a su plantilla, el sistema lo tomaría por un giro de cabeza y el bostezo no se contaría.
+
+**Riesgo que queda abierto.** Los ojos sí están en la plantilla, así que cerrarlos también baja el parecido. Con la cara dibujada el puntaje baja de 0.91 a 0.70 al cerrar los ojos, y el umbral de distracción está en 0.50. Si con una persona real bajara de 0.50, un cierre de ojos se tomaría por distracción, los ojos quedarían sin dato y un microsueño no se detectaría. Es lo primero que hay que mirar con el primer video real. Si pasa, las salidas son bajar el umbral de distracción o quitar la zona de los ojos de la plantilla.
+
+### D33. Dónde se mide la iluminación
+
+La especificación de histograma supone que la imagen y la referencia muestran lo mismo y que solo cambió la luz. Con el rostro completo eso no se cumple: al abrir la boca hay más pixeles oscuros, y la especificación los aclara como si fueran un cambio de luz. Se vio al correr el sistema completo: el bostezo de la escena dibujada no se detectaba.
+
+La solución fue armar la tabla de niveles de gris con la parte de arriba del rostro, que casi no cambia, y aplicarla al rostro completo. Solo la boca usa el rostro corregido, porque su medida depende de un umbral de gris fijo. La medida de ojos es un cociente y no lo necesita.
 
 ## Detalle de las decisiones pendientes
 
@@ -165,3 +193,23 @@ Los cuatro frentes están en `plan_de_trabajo.md`. Falta poner un nombre en cada
 ### D24. Equipo de la demo
 
 Falta decidir en qué computadora y con qué cámara se presenta. Importa porque el ensayo final y las mediciones de desempeño deben hacerse en ese mismo equipo.
+
+### D29. Videos sin calibración
+
+**El problema.** El sistema arranca con una calibración: la persona pone la cara en un recuadro, mira al frente y cierra los ojos. Eso funciona en la demo en vivo. Pero el enunciado dice que se proporcionarán videos de prueba, y un video ya grabado no trae esa secuencia. Además, las imágenes de bostezo de Kaggle muestran personas dentro de un auto, con el rostro pequeño y visto de lado. Si los videos de prueba son así, la calibración como está diseñada no aplica.
+
+**Propuesta.** Un segundo modo de arranque para archivos de video:
+
+1. Quien opera el sistema marca el rostro con el ratón en el primer cuadro. Es parte de la interfaz, no un algoritmo.
+2. Esa caja se toma como plantilla.
+3. Para los ojos se usan las referencias generales de `config.py` (0.72 y 0.41), que salieron del dataset de Kaggle y funcionaron sin calibración.
+
+**Qué falta.** Preguntar a los profesores cómo serán los videos de prueba y si se permite marcar el rostro a mano. La pregunta está en `guia_de_supervision.md`.
+
+### D31. Medida de la boca
+
+**El problema.** El diseño inicial usaba para la boca la misma medida que para los ojos (separación de picos), y esa medida se descartó. Las imágenes de bostezo de Kaggle no sirven para probar otra, porque son escenas completas y no recortes de boca.
+
+**Propuesta.** Medir el alto de la zona oscura de la boca, descrito en `somnolencia/percepcion/README.md`.
+
+**Qué falta.** Probarla con los videos del guion G3 antes de darla por buena.

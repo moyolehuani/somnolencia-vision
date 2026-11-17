@@ -54,7 +54,7 @@ Aquí deben ir dos archivos en la raíz del repositorio. Los crea el frente 4 en
 | Archivo | Contenido | Quién lo instala |
 |---|---|---|
 | `requirements.txt` | `numpy`, `opencv-python` | Todos. Es lo único que necesita la demo |
-| `requirements-dev.txt` | `pytest`, `matplotlib`, `jupyter` | Todos, para pruebas, gráficas y cuadernos de verificación |
+| `requirements-dev.txt` | `pytest`, `matplotlib`, `jupyter` | Todos, para pruebas y para las gráficas del reporte |
 
 Cuando el sistema funcione por primera vez en una computadora, se anotan las versiones exactas en esos archivos (por ejemplo `numpy==X.Y.Z`). Las versiones instaladas se ven con `pip freeze`. Así todos instalan lo mismo.
 
@@ -65,10 +65,12 @@ Mantener `requirements.txt` con solo dos bibliotecas es deliberado. Demuestra qu
 ```bash
 python -m somnolencia.principal --fuente 0                  # cámara
 python -m somnolencia.principal --fuente datos/videos/P01_G2_01.mp4   # video
-python -m somnolencia.principal --fuente simulador          # señales inventadas, sin cámara
+python -m somnolencia.principal --fuente escena             # cara dibujada con guion, sin cámara
 ```
 
-Teclas dentro de la ventana (las implementa `interfaz/controles.py`):
+Se abren dos ventanas: la principal y "Controles", con los deslizadores y su leyenda.
+
+Teclas dentro de la ventana (las atiende `somnolencia/principal.py`):
 
 | Tecla | Acción |
 |---|---|

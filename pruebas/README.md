@@ -45,7 +45,6 @@ La última prueba comprueba que el resultado depende del tiempo y no del número
 | Aperturas 0.80, 0.22, 0.18, 0.27, 0.23, 0.28, 0.40 | ABIERTO, ABIERTO, CERRADO, CERRADO, CERRADO, CERRADO, ABIERTO |
 | Medición con `valido = False` | `SIN_DATO` |
 
-En esta prueba el antirrebote se pone en cero, para probar solo el umbral doble.
 
 ### `test_perclos.py` (frente 4)
 
@@ -70,17 +69,50 @@ En esta prueba el antirrebote se pone en cero, para probar solo el umbral doble.
 
 ### `test_percepcion.py` (frentes 1, 2 y 3)
 
-**Aquí deben ir las pruebas que** comprueban cada algoritmo con una entrada sintética sencilla. Son una versión corta de los cuadernos de `verificacion/`.
+**Aquí deben ir las pruebas que** comprueban cada algoritmo con una entrada sintética sencilla. Son una versión corta de `verificacion/verificar.py`.
 
 | Función | Entrada | Resultado esperado |
 |---|---|---|
 | `suavizar_binomial` | Imagen constante | La misma imagen, fuera de la orilla |
 | `gradiente_vertical` | Rampa vertical | Valor constante, fuera de la orilla |
-| `separacion_de_picos` | Dos líneas horizontales a 10 px | 10 |
+| `razon_de_bordes` | Disco oscuro (ojo abierto) y línea oscura (ojo cerrado), dibujados | Mayor que 1 con el disco, menor que 0.1 con la línea |
 | `correlacion_normalizada` | Plantilla recortada de la propia imagen | Máximo de 1.0 en la posición del recorte |
 | `correlacion_de_fase` | Imagen desplazada 5 px a la derecha y 3 hacia abajo | (5, 3), con el signo acordado |
 | `normalizar_rostro` | Caja del mismo tamaño que la salida | La misma imagen |
 | `especificar_histograma` | Imagen contra su propio histograma | La misma imagen |
+
+### `test_sistema.py` (todos)
+
+**Aquí están las pruebas que** corren el sistema completo sobre la escena dibujada de `somnolencia/escena_sintetica.py` y comprueban que:
+
+- Salen exactamente los eventos del guion, con duraciones que difieren en menos de un cuadro.
+- La calibración aprende las referencias de ojos y no cuenta eventos mientras dura.
+- Durante el giro los ojos quedan sin dato, y al regresar el rostro se reencuentra.
+- El bostezo no se confunde con distracción.
+- La caja sigue a la cara, también cuando se mueve más que la ventana de búsqueda.
+- La interfaz dibuja sin fallar en todas las fases.
+
+Estas pruebas tardan unos 10 segundos porque procesan 45 s de video. Comprueban que las piezas están conectadas. No miden qué tan bien funciona el sistema con personas.
+
+### `test_por_evento.py` (frente 4)
+
+**Aquí están las pruebas de** `evaluacion/por_evento.py` y de la bitácora de mediciones.
+
+| Caso | Resultado esperado |
+|---|---|
+| Anotado de 10.0 a 13.0 y detectado de 10.07 a 13.13 | Una pareja, error de duración de 0.06 s |
+| Un anotado y ningún detectado | Recall 0 |
+| Ningún anotado y un detectado | Precisión 0 |
+| Un cierre anotado de 8 s que el sistema partió en dos | Una pareja con el pedazo más largo, un detectado de más, y categoría distinta |
+| Parpadeo anotado y bostezo detectado en el mismo tramo | Ninguna pareja |
+| Distracción anotada de 0.4 s | No se cuenta |
+| Bitácora de la escena contra las anotaciones de su guion | Cinco parejas, precisión y recall de 1 |
+| Mediciones de la escena | 676 filas, una por cuadro |
+| PERCLOS del sistema contra el de las anotaciones | Error medio menor a medio punto porcentual |
+
+### `escena_procesada.py`
+
+No es un archivo de pruebas. Corre el sistema sobre la escena dibujada una sola vez y guarda el resultado, para que `test_sistema.py` y `test_por_evento.py` lo compartan sin procesar la escena dos veces.
 
 ### `test_reglas.py` (frente 4)
 

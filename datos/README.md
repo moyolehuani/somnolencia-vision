@@ -107,6 +107,7 @@ Esto supone que el original es horizontal y de proporción 16:9. Si no lo es, se
 | `fps` | `30` | Cuadros por segundo del archivo |
 | `resolucion` | `1280x720` | |
 | `duracion_s` | `62.4` | |
+| `caja` | `265,111,110,138` | Caja del rostro en el primer cuadro: x, y, ancho, alto, en la imagen de 640×360. Es lo que se pasa a `--caja` para evaluar sin ventana |
 | `condiciones` | `luz de salón, sin lentes` | |
 | `fecha` | `2026-11-20` | Fecha de grabación |
 | `anotado_por` | `P01` | Código de quien anotó |

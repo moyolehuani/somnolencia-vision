@@ -44,7 +44,7 @@ Después se marcan las casillas de `plan_de_trabajo.md` y se actualiza `decision
 
 ### Cada jueves, integración
 
-Alguien baja `main`, instala y corre el sistema completo. Si no corre, arreglarlo es la prioridad de todos.
+Alguien baja `main`, instala, corre `python revisar.py` y después el sistema completo. Si algo no corre, arreglarlo es la prioridad de todos.
 
 ### En cada hito
 
@@ -72,6 +72,9 @@ La penúltima casilla importa tanto como las demás. La defensa vale 20% y el en
 | El seguimiento del rostro falla con la luz del salón | En pruebas con otra luz el puntaje de correlación se cae sin que la persona se mueva | Correlacionar sobre la banda laplaciana, ensayar en el salón, recalibrar al llegar |
 | La medición de ojos no distingue abierto de cerrado | El F1 por cuadro sale debajo de 0.8, o los perfiles de gradiente se ven iguales en ambos casos | Revisar la franja de ojos, el suavizado y el tamaño del rostro normalizado antes de cambiar de método |
 | El sistema va lento | Menos de 10 cuadros por segundo en la primera integración | Medir por etapa, reducir la ventana de búsqueda, bajar la resolución |
+| Cerrar los ojos se confunde con voltear | Con el primer video real, el puntaje de la cabeza baja de 0.5 al cerrar los ojos | Ver D32: bajar el umbral de distracción o quitar los ojos de la plantilla |
+| El código funciona con la cara dibujada pero no con personas | Los eventos del primer video real no coinciden con el guion | Es de esperarse en la primera prueba. Mirar la vista de depuración para ver qué pieza falla: caja, recortes de ojos o umbrales |
+| Nadie del equipo entiende el código que ya está escrito | No pueden explicar un archivo de su frente | Cada frente lee sus archivos esta semana y los explica a otro. Si algo no se entiende, se simplifica |
 | Un módulo se atrasa y bloquea a los demás | Dos reuniones seguidas sin mostrar nada funcionando | El simulador permite seguir sin ese módulo. Reasignar ayuda |
 | Las piezas no embonan al juntarlas | Un módulo entrega algo distinto de `Medicion` | Integración temprana y revisión del contrato en cada pull request |
 | Se suben datos personales por error | Aparece un archivo de video o un cuaderno pesado en un pull request | Revisar `git status` antes de cada commit. La lista de revisión lo incluye |
@@ -115,3 +118,4 @@ Conviene enviarlas juntas esta semana.
 7. ¿Cómo quieren recibir el software: archivo zip o acceso al repositorio?
 8. ¿Cuándo entregan los videos de prueba y tienen alguna restricción de uso?
 9. ¿Es obligatorio usar los dos datasets de Kaggle, o son un apoyo? (D26)
+10. ¿Cómo serán los videos de prueba? ¿De frente con webcam, o dentro de un auto como las imágenes de bostezo de Kaggle? ¿Se permite que quien opera el sistema marque el rostro en el primer cuadro? (D29)

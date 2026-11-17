@@ -2,7 +2,50 @@
 
 De mediciones a eventos, PERCLOS y alertas. Esta carpeta no ve imágenes y no importa `cv2`. Recibe números con su marca de tiempo y aplica las reglas del enunciado.
 
-Responsable: frente 4. Es lo primero que se programa, porque no depende de nada más y se prueba con señales inventadas.
+Responsable: frente 4. **Esta carpeta ya está escrita y probada.** Lo que sigue describe lo que hace cada archivo.
+
+## Archivos y funciones
+
+| Archivo | Elemento | Recibe | Entrega |
+|---|---|---|---|
+| `estados.py` | `ActualizadorDeEstado.actualizar(medicion)` | Una `Medicion` | El estado de esa señal |
+| `estados.py` | `crear_actualizador_ojos()`, `crear_actualizador_boca()`, `crear_actualizador_cabeza()` | Nada | Un actualizador con los umbrales de `config.py` |
+| `eventos.py` | `clasificar_parpadeo(duracion)` | Segundos | `normal`, `lento` o `microsueno` |
+| `eventos.py` | `banda_de_distraccion(duracion)` | Segundos | 0.5, 1.0, 1.5, 2.0 o `None` |
+| `eventos.py` | `SeguidorDeEvento.actualizar(t, estado)` | Tiempo y estado de una señal | `None`, o `(resultado, inicio, fin)` cuando un evento termina |
+| `eventos.py` | `RastreadorDeEventos.actualizar(t, estado_ojos, estado_boca, estado_cabeza)` | Tiempo y los tres estados | Lista de `Evento` cerrados en ese cuadro |
+| `eventos.py` | `RastreadorDeEventos.cerrar_todo(t)` | Tiempo final | Eventos que quedaban abiertos |
+| `perclos.py` | `calcular_perclos(t, t_inicio, cierres, huecos)` | Tiempo actual, inicio de sesión, cierres y tramos sin dato | `(valor, nivel)` |
+| `alertas.py` | `nivel_de_alerta(cierre_en_curso_s, distraccion_en_curso_s, nivel_perclos)` | Lo que está en curso y el nivel de PERCLOS | `(nivel, motivo)` |
+| `capa.py` | `CapaTemporal.actualizar(t, medicion_ojos, medicion_boca, medicion_cabeza)` | Tiempo y las tres mediciones | Diccionario con estados, eventos nuevos, contadores, PERCLOS y alerta |
+
+## Cómo usarla
+
+```python
+from somnolencia.tipos import Medicion
+from somnolencia.temporal.capa import CapaTemporal
+
+capa = CapaTemporal()
+resumen = capa.actualizar(
+    12.4,
+    Medicion(12.4, 0.80, True),    # ojos
+    Medicion(12.4, 0.02, True),    # boca
+    Medicion(12.4, 0.82, True),    # cabeza
+)
+print(resumen["estado_ojos"], resumen["perclos"], resumen["alerta"])
+```
+
+## Dónde se cambia cada regla
+
+| Para cambiar... | Se toca... |
+|---|---|
+| Un umbral de duración o de PERCLOS | `config.py` (los del enunciado no se cambian) |
+| Si PERCLOS cuenta los parpadeos normales (D09) | `PERCLOS_CUENTA_PARPADEOS_NORMALES` en `config.py` |
+| Cómo se leen las bandas de distracción (D10) | `banda_de_distraccion` en `eventos.py` |
+| Cuántos cuadros de ruido se toleran | `ANTIRREBOTE_CUADROS` en `config.py` |
+| Qué alerta corresponde a qué situación | `nivel_de_alerta` en `alertas.py` |
+
+Después de cualquier cambio se corre `python -m pytest`. Las pruebas de esta carpeta cubren los límites exactos del enunciado.
 
 Una regla para toda la carpeta: **las duraciones se calculan con marcas de tiempo, nunca contando cuadros**. La cámara no entrega los cuadros a intervalos exactos.
 
@@ -25,15 +68,9 @@ Dos mecanismos:
 
 Con umbral doble sale un solo parpadeo. Con un solo umbral salen dos, y el segundo es falso.
 
-**Antirrebote.** Funciona distinto al entrar y al salir de un cierre:
-
-- Entrar a `CERRADO` se acepta de inmediato. A 15 cuadros por segundo un parpadeo de 0.2 s dura solo 3 cuadros, y si se exigiera esperar se perderían los parpadeos cortos.
-- Salir de `CERRADO` solo se acepta si la apertura se sostiene más de `ANTIRREBOTE_CUADROS` cuadros. Si en medio de un cierre aparecen uno o dos cuadros abiertos, se ignoran y el cierre continúa.
-- Cuando la salida sí se acepta, el fin del cierre es la marca de tiempo del primer cuadro abierto, no la del cuadro en que se confirmó.
-
-Lo mismo aplica a la boca abierta y a la cabeza distraída.
-
 Si la medición llega con `valido = False`, el estado es `SIN_DATO`.
+
+Hay tres funciones que crean el actualizador de cada señal con sus umbrales de `config.py`: `crear_actualizador_ojos`, `crear_actualizador_boca` y `crear_actualizador_cabeza`.
 
 ---
 
@@ -41,7 +78,16 @@ Si la medición llega con `valido = False`, el estado es `SIN_DATO`.
 
 **Aquí debe ir el código que** abre, cierra y clasifica los eventos.
 
-- `RastreadorDeEventos`: recibe los tres estados y el tiempo en cada cuadro. Entrega la lista de eventos que se cerraron en ese cuadro y permite consultar los eventos en curso y cuánto llevan.
+- `SeguidorDeEvento`: sigue una sola señal y avisa cuando un evento termina.
+- `RastreadorDeEventos`: junta tres seguidores, recibe los tres estados y el tiempo en cada cuadro, y entrega la lista de eventos que se cerraron en ese cuadro. Permite consultar los eventos en curso y cuánto llevan.
+
+### Antirrebote
+
+Funciona distinto al entrar y al salir de un evento:
+
+- Entrar se acepta de inmediato. A 15 cuadros por segundo un parpadeo de 0.2 s dura solo 3 cuadros, y si se exigiera esperar se perderían los parpadeos cortos.
+- Salir solo se acepta si el estado de reposo se sostiene más de `ANTIRREBOTE_CUADROS` cuadros. Si en medio de un cierre aparecen uno o dos cuadros abiertos, se ignoran y el cierre continúa.
+- Cuando la salida sí se acepta, el fin del evento es la marca de tiempo del primer cuadro en reposo, no la del cuadro en que se confirmó.
 
 ### Parpadeos
 
@@ -88,7 +134,7 @@ El rastreador lleva la cuenta de parpadeos por categoría, bostezos y episodios 
 
 **Aquí debe ir el código que** calcula el porcentaje de tiempo con los ojos cerrados en los últimos 30 segundos.
 
-- `Perclos`: recibe el estado de los ojos y el tiempo en cada cuadro. Entrega el porcentaje y el nivel.
+- `calcular_perclos(t, t_inicio, cierres, huecos)`: recibe el tiempo actual, el inicio de la sesión y dos listas de tramos que lleva el rastreador (los cierres de ojos y los tramos sin dato). Entrega el porcentaje y el nivel.
 
 ```
 PERCLOS = tiempo cerrado que cuenta, dentro de la ventana
@@ -131,7 +177,7 @@ Casos que hay que cuidar:
 
 **Aquí debe ir el código que** decide qué alerta mostrar en cada cuadro, a partir de los eventos en curso y de PERCLOS.
 
-- `nivel_de_alerta(rastreador, perclos)`: entrega el nivel y el motivo.
+- `nivel_de_alerta(cierre_en_curso_s, distraccion_en_curso_s, nivel_perclos)`: entrega el nivel y el motivo.
 
 Propuesta de reglas. Se aplica la más grave que se cumpla:
 
@@ -146,8 +192,14 @@ El enunciado indica que la notificación al conductor ocurre en la banda interme
 
 ---
 
+## `capa.py`
+
+**Aquí va el código que** junta todo lo anterior en un solo objeto, `CapaTemporal`. El ciclo principal llama a `actualizar(t, ojos, boca, cabeza)` una vez por cuadro con las tres mediciones y recibe un diccionario con los estados, los eventos nuevos, los contadores, lo que está en curso, PERCLOS y la alerta.
+
+---
+
 ## Hecho cuando
 
 - Pasan todas las pruebas de `pruebas/README.md`.
-- Con `--fuente simulador` la interfaz muestra los eventos y niveles que el guion del simulador debe producir.
+- Con `--fuente escena` la interfaz muestra los eventos y niveles que el guion de la escena debe producir.
 - Cambiar `PERCLOS_CUENTA_PARPADEOS_NORMALES` o las bandas de distracción en `config.py` cambia el comportamiento sin tocar otro archivo.

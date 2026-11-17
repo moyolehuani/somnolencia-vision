@@ -12,8 +12,8 @@ Estos son los que se presentan como "implementados por el equipo". Todos vienen 
 
 | # | Técnica | Práctica | Archivo | Para qué se usa | Se verifica contra |
 |---|---|---|---|---|---|
-| 1 | Especificación de histograma | P4 | `preproceso.py` | Igualar la iluminación de cada cuadro a la del cuadro de calibración | Comparación de histogramas acumulados |
-| 2 | Filtros espaciales: binomial y gradiente | P5 | `preproceso.py`, `gradiente.py` | Quitar ruido y medir la separación de párpados y labios | `cv2.GaussianBlur`, `cv2.Sobel` |
+| 1 | Especificación de histograma | P4 | `preproceso.py` | Igualar la iluminación de cada cuadro a la del cuadro de calibración | `cv2.equalizeHist` y comparación de histogramas acumulados |
+| 2 | Filtros espaciales: binomial y gradiente | P5 | `preproceso.py`, `gradiente.py` | Quitar ruido y medir los bordes del ojo en las dos direcciones | `cv2.GaussianBlur`, `cv2.Sobel` |
 | 3 | Pirámide gaussiana y banda laplaciana | P6 | `piramide.py` | Buscar el rostro de grueso a fino y comparar en una banda poco sensible a la luz | `cv2.pyrDown` |
 | 4 | Correlación de fase (Fourier) | P6 | `correlacion.py` | Medir cuánto se desplazó la cabeza entre dos cuadros | `cv2.phaseCorrelate` |
 | 5 | Transformación geométrica con mapeo inverso | P3 | `geometria.py` | Llevar el rostro a un tamaño fijo | `cv2.warpAffine` |
@@ -23,28 +23,42 @@ Opcional, solo si sobra tiempo: SIFT con RANSAC y homografía (P7) para confirma
 
 ### Cómo mide la apertura el algoritmo 2
 
-Este es el punto central del sistema, así que va con un ejemplo.
+Este es el punto central del sistema, así que va con detalle.
 
-Se toma la franja del rostro normalizado donde caen los ojos, por ejemplo de 128 px de ancho por 35 de alto. Se suaviza con el filtro binomial y se calcula el gradiente vertical, que responde donde la intensidad cambia de un renglón al siguiente. Después se suma el valor absoluto del gradiente a lo largo de cada renglón. El resultado es un perfil con un número por renglón.
+En un ojo abierto se ve el iris, que es un disco oscuro. Sus lados izquierdo y derecho son bordes verticales, y un borde vertical aparece en el gradiente horizontal. En un ojo cerrado solo queda la línea de las pestañas, que es un borde horizontal y aparece en el gradiente vertical.
 
-- Con el ojo abierto hay dos renglones donde el perfil es alto: el borde del párpado superior y el borde inferior del ojo. Supongamos que quedan en los renglones 12 y 23. La separación es 11 px.
-- Con el ojo cerrado los dos bordes se juntan en la línea de las pestañas. Queda un solo pico, o dos a 1 o 2 px. La separación es casi 0.
-
-La apertura compara la separación actual con las dos que se midieron en la calibración, una con los ojos abiertos y otra con los ojos cerrados:
+La medida es el cociente entre las dos cosas:
 
 ```
-apertura = (separación actual − separación cerrada) / (separación abierta − separación cerrada)
+razón = suma de |gradiente horizontal| / suma de |gradiente vertical|
 ```
 
-Si en la calibración fueron 11 px con los ojos abiertos y 1 px con los ojos cerrados, y ahora son 9, la apertura es (9 − 1) / (11 − 1) = 0.80. Si ahora son 2, la apertura es 0.10 y el ojo se declara cerrado porque quedó debajo de 0.20.
+Se calcula así, sobre el recorte de un ojo de 64 px de ancho:
 
-Las cejas también son bordes horizontales y pueden confundir la medida. Por eso la franja de los ojos no se fija a mano: se toma de la calibración, como las filas donde el perfil más cambia entre ojos abiertos y ojos cerrados.
+1. Se descarta el 30% superior del recorte, donde suele estar la ceja.
+2. Se suaviza con el filtro binomial.
+3. Se busca la banda de 5 renglones más oscura. Ahí está el iris o la línea de pestañas.
+4. En esa banda, con 4 renglones de margen arriba y abajo y en las columnas centrales, se suman los valores absolutos de los dos gradientes de Sobel y se dividen.
 
-La boca se mide igual, en su propia franja y contra su separación en reposo.
+La razón se convierte en apertura con dos referencias, la del ojo abierto y la del ojo cerrado:
+
+```
+apertura = (razón − razón cerrado) / (razón abierto − razón cerrado)
+```
+
+Con las referencias 0.74 y 0.39, una razón de 0.67 da (0.67 − 0.39) / (0.74 − 0.39) = 0.80. Una razón de 0.45 da 0.17 y el ojo se declara cerrado porque quedó debajo de 0.20.
+
+Las referencias salen de la calibración de la persona. Si no hay calibración, se usan 0.72 y 0.41, que son las medianas medidas en el dataset de Kaggle.
+
+**Evidencia.** Sobre los 1452 recortes de ojos de Kaggle (726 abiertos y 726 cerrados, sin calibración y con un solo umbral), la medida separa las dos clases con F1 de 0.86 y 0.84 en las dos mitades de prueba, cerca de 85% de aciertos. Detalle en `evaluacion.md`.
+
+**La idea que se descartó.** El primer diseño medía la separación entre los bordes de los párpados en el perfil del gradiente vertical. Con las mismas 84 imágenes no distinguió abierto de cerrado mejor que el azar. La ceja, las pestañas y los pliegues del párpado producen picos que se confunden con los párpados. Se conserva aquí porque es un buen ejemplo para el reporte de por qué se prueba antes de construir.
+
+La medida de la boca todavía no está validada (decisión D31).
 
 ### Cómo se mantiene barato el algoritmo 6
 
-Buscar la plantilla en toda la imagen sería lento. Se hace en el nivel más pequeño de la pirámide (160×90), con una plantilla de unos 30×38 px, y solo en una ventana de 8 px alrededor de la posición anterior. Son 17×17 = 289 posiciones de unos 1100 px cada una, cerca de 330 mil multiplicaciones por cuadro, que NumPy resuelve sin problema. Después se afina en el nivel siguiente con una ventana de 2 px.
+Buscar la plantilla en toda la imagen sería lento. Se hace en el nivel más pequeño de la pirámide (160×90), con una plantilla de unos 30×38 px, y solo en una ventana de 8 px alrededor de la posición anterior. Son 17×17 = 289 posiciones de unos 1100 px cada una, cerca de 330 mil multiplicaciones por cuadro. Medido, tarda unos 3 ms. Después se afina en el nivel siguiente con una ventana de 2 px.
 
 ## Funciones de biblioteca que sí se usan
 

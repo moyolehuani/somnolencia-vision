@@ -1,5 +1,11 @@
 # Documentación
 
+Antes que nada:
+
+- [estado_actual.md](estado_actual.md) dice qué está escrito y cómo se probó.
+- [tareas_pendientes.md](tareas_pendientes.md) dice lo que falta, tarea por tarea.
+- [../AGENTS.md](../AGENTS.md) resume las reglas del proyecto. Es lo que debe leer un asistente de IA antes de ayudar.
+
 Orden de lectura sugerido para alguien que llega por primera vez:
 
 1. [arquitectura.md](arquitectura.md). Qué piezas tiene el sistema y cómo se hablan entre sí.

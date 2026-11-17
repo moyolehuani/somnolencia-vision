@@ -1,210 +1,309 @@
 # `percepcion/`
 
-De un cuadro de video a tres mediciones. Aquí viven los algoritmos de visión computacional del proyecto.
+De un cuadro de video a tres mediciones: apertura de ojos, apertura de boca y frontalidad de la cabeza. Aquí viven todos los algoritmos de visión computacional del proyecto, escritos a mano con NumPy.
 
-Cada archivo tiene abajo qué código debe ir, qué recibe, qué entrega, con qué se verifica y cuándo se considera terminado. Los nombres de funciones son una propuesta. Lo que no puede cambiar sin avisar es lo que entregan `ojos.py`, `boca.py` y `cabeza.py`, porque de eso depende la capa temporal.
+## Estado
 
-Orden en que conviene programarlos: `captura`, `preproceso`, `piramide`, `correlacion`, `calibracion`, `rostro`, `geometria`, `gradiente`, `ojos`, `boca`, `cabeza`.
+| Archivo | Frente | Qué hace | Estado |
+|---|---|---|---|
+| `preproceso.py` | 2 | Grises, filtros, histograma | Verificado contra OpenCV |
+| `gradiente.py` | 2 | Gradientes de Sobel y razón de bordes | Verificado contra OpenCV |
+| `ojos.py` | 2 | Apertura de ojos | Probado con Kaggle (F1 de 0.84 a 0.86 sin calibración). Falta probarlo con calibración y video |
+| `piramide.py` | 1 | Pirámide gaussiana y banda laplaciana | Verificado contra OpenCV |
+| `correlacion.py` | 1 y 3 | Correlación normalizada y de fase | Verificado contra OpenCV |
+| `geometria.py` | 1 | Mapeo inverso y recortes de ojos | Verificado contra OpenCV. Las filas de los recortes son provisionales |
+| `rostro.py` | 1 | Seguimiento del rostro | Probado con la escena dibujada. Sin probar con personas |
+| `captura.py` | 1 | Lectura de cámara, video o escena | Probado con escena y archivo. Sin probar con cámara |
+| `cabeza.py` | 3 | Frontalidad | Probado con la escena dibujada |
+| `boca.py` | 3 | Apertura de boca | Probado con la escena dibujada. Sin validar con bocas reales (D31) |
 
----
+Qué significa cada nivel:
 
-## `captura.py` (frente 1)
+- **Verificado contra OpenCV.** El algoritmo propio da lo mismo que la función de biblioteca. Se comprueba con `python -m verificacion.verificar` y con `pytest`.
+- **Probado con Kaggle.** La medida distingue ojos abiertos de cerrados en fotos reales.
+- **Probado con la escena dibujada.** Funciona con la cara de dibujo de `escena_sintetica.py`. Comprueba que las piezas están conectadas. No comprueba que funcione con una persona.
 
-**Aquí debe ir el código que** abre la cámara o un archivo de video y entrega cuadros con su marca de tiempo.
+La calibración no está en esta carpeta. Vive en `somnolencia/sistema.py`.
 
-- `abrir(fuente)`: recibe `"0"` para la cámara o una ruta de video.
-- `a_tamano_de_trabajo(cuadro)`: entrega el cuadro en 640×360. Los videos se graban en 1280×720, así que se reducen a la mitad con `piramide.reducir`. En vivo se le pide a la cámara 640×360 directo si lo admite, para ahorrar ese paso.
-- `leer(captura)`: entrega `(cuadro, t)` o `None` cuando se acaba el video.
+## Convenciones
 
-La marca de tiempo se calcula distinto según la fuente:
+- Las imágenes son arreglos de NumPy en grises, `float32`, con valores de 0 a 255 y forma `(alto, ancho)`.
+- Las cajas son `(x, y, ancho, alto)` en pixeles.
+- Los parámetros salen de `config.py`.
+- No se usan las funciones de OpenCV equivalentes a estos algoritmos. Una prueba lo vigila.
 
-- Con cámara, `t` es el reloj del sistema al leer el cuadro (`time.monotonic()`), contado desde que arrancó el programa.
-- Con archivo, `t` es el número de cuadro dividido entre los cuadros por segundo del video. Así el resultado es el mismo sin importar qué tan rápido procese la computadora, y la evaluación es reproducible.
+## Cómo se conectan los archivos
 
-Usa `cv2.VideoCapture`, permitido por el enunciado para adquirir imágenes.
+```
+captura.py ──> gris 640x360
+                 │
+piramide.py ──> 3 niveles ──> rostro.py (usa correlacion.py) ──> caja, puntaje
+                                                                   │
+                              geometria.py ──> rostro 128x160 <────┘
+                                 │                    │
+                     recortes de ojos            preproceso.py (histograma)
+                                 │                    │
+                 ojos.py (usa gradiente.py)        boca.py
+                                 │                    │
+                             Medicion              Medicion        cabeza.py ──> Medicion
+```
 
-**Hecho cuando:** imprime resolución y cuadros por segundo reales con cámara y con archivo.
-
----
-
-## `preproceso.py` (frente 2)
-
-**Aquí debe ir el código que** prepara la imagen: grises, suavizado y especificación de histograma. Se adapta lo hecho en las prácticas 4 y 5.
-
-- `a_grises(cuadro)`: conversión de formato.
-- `suavizar_binomial(img)`: filtro pasabajas con el núcleo binomial de `config.py`, aplicado de forma separable (primero por renglones, después por columnas).
-- `histograma_acumulado(img)`: entrega el histograma acumulado normalizado.
-- `especificar_histograma(img, acumulado_ref)`: transforma los niveles de gris de `img` para que su histograma acumulado se parezca al de referencia. Para cada nivel de entrada se busca el nivel cuyo acumulado de referencia es el más cercano, y con eso se arma una tabla de 256 entradas.
-
-La especificación se aplica al rostro normalizado, que es pequeño, y no al cuadro completo.
-
-Para que sea rápido: el filtro separable con un núcleo de 5 se escribe como la suma de 5 copias desplazadas del arreglo, sin ciclos por pixel.
-
-**Se verifica contra:** `cv2.GaussianBlur` con el mismo núcleo, y la comparación de acumulados antes y después de especificar.
-
-**Hecho cuando:** las dos verificaciones están en `verificacion/` y la función tarda menos de 3 ms sobre un rostro de 128×160.
-
----
-
-## `piramide.py` (frente 1)
-
-**Aquí debe ir el código que** construye la pirámide gaussiana y la banda laplaciana. Se adapta lo hecho en la práctica 6.
-
-- `reducir(img)`: suaviza con el binomial y se queda con un pixel de cada dos en cada dirección.
-- `piramide_gaussiana(img, niveles)`: lista de imágenes, de la más grande a la más pequeña.
-- `banda_laplaciana(img)`: la imagen menos su versión suavizada. Conserva bordes y detalles y descarta los cambios lentos de iluminación.
-
-**Se verifica contra:** `cv2.pyrDown`.
-
-**Hecho cuando:** la verificación está en `verificacion/` y construir tres niveles desde 640×360 tarda menos de 5 ms.
+`preproceso.filtrar_1d` es la base de todos los filtros: la usan el suavizado, los gradientes y la pirámide.
 
 ---
 
-## `correlacion.py` (frentes 1 y 3)
+## `preproceso.py`
 
-**Aquí debe ir el código que** compara imágenes de dos maneras.
+Filtros espaciales (práctica 5) y especificación de histograma (práctica 4).
 
-### Correlación normalizada (frente 1)
+| Función | Recibe | Entrega |
+|---|---|---|
+| `a_grises(cuadro)` | Cuadro BGR de OpenCV | Imagen en grises `float32` |
+| `filtrar_1d(img, nucleo, eje)` | Imagen, núcleo de una dimensión, `eje` 0 (vertical) o 1 (horizontal) | Imagen filtrada, del mismo tamaño |
+| `suavizar_binomial(img)` | Imagen | Imagen suavizada con el núcleo (1, 4, 6, 4, 1)/16 en las dos direcciones |
+| `histograma_acumulado(img)` | Imagen | Arreglo de 256 valores entre 0 y 1 |
+| `tabla_de_especificacion(img, acumulado_ref)` | Imagen y acumulado de referencia | Tabla de 256 entradas: a qué nivel va cada nivel de gris |
+| `aplicar_tabla(img, tabla)` | Imagen y tabla | Imagen con los niveles reemplazados |
+| `especificar_histograma(img, acumulado_ref)` | Imagen y acumulado de referencia | Lo mismo que armar la tabla con la imagen y aplicársela |
 
-- `correlacion_normalizada(ventana, plantilla)`: desliza la plantilla sobre la ventana y entrega un mapa con un valor entre -1 y 1 por posición. En cada posición se resta la media a los dos recortes, se multiplican pixel a pixel, se suma y se divide entre el producto de sus normas.
+### Cómo funciona `filtrar_1d`
 
-Restar la media y dividir entre las normas hace que el resultado no cambie si la imagen se aclara o se oscurece de manera uniforme.
+En vez de recorrer la imagen pixel por pixel, suma copias desplazadas de la imagen, cada una multiplicada por un peso del núcleo. Con un núcleo de 5 elementos son 5 sumas de arreglos completos.
 
-**Se verifica contra:** `cv2.matchTemplate` con el método `TM_CCOEFF_NORMED`. El máximo debe caer en la misma posición.
+En las orillas la imagen se extiende reflejándola (`np.pad` con modo `reflect`). Es el mismo tratamiento que usa OpenCV por omisión, y por eso los resultados coinciden hasta el redondeo.
 
-### Correlación de fase (frente 3)
+Un filtro de dos dimensiones separable se obtiene llamándola dos veces, una por eje. El binomial de 5×5 cuesta así 10 sumas en vez de 25.
 
-- `correlacion_de_fase(a, b)`: entrega `(dx, dy, pico)`, el desplazamiento entre dos imágenes del mismo tamaño y qué tan nítido fue el resultado.
+### Cómo funciona la especificación de histograma
 
-Pasos: multiplicar ambas imágenes por una ventana que las atenúe hacia los bordes, calcular sus transformadas de Fourier, multiplicar una por el conjugado de la otra, dividir entre la magnitud para quedarse solo con la fase, regresar con la transformada inversa y buscar el máximo. La posición del máximo es el desplazamiento. Los máximos que caen en la segunda mitad del arreglo corresponden a desplazamientos negativos.
+Para cada nivel de gris `g` de la imagen se busca el nivel `r` cuyo acumulado de referencia es el más cercano al acumulado de `g` en la imagen.
 
-**Se verifica contra:** un desplazamiento puesto a mano (por ejemplo, recorrer una imagen 5 px a la derecha y 3 hacia abajo y recuperar esos números) y `cv2.phaseCorrelate`. Cuidado con el signo: hay que comprobar con el desplazamiento conocido cuál imagen se toma como referencia.
+Ejemplo. Si el 30% de los pixeles de la imagen tiene nivel 80 o menos, y en la referencia el 30% tiene nivel 120 o menos, la tabla manda el nivel 80 al 120.
 
-**Hecho cuando:** las dos verificaciones están en `verificacion/`.
+Cuidado: supone que la imagen y la referencia muestran lo mismo y que solo cambió la luz. Si cambia el contenido, la especificación lo "corrige" como si fuera luz. Por eso el sistema arma la tabla con la parte de arriba del rostro y la aplica al rostro completo (decisión D33).
 
----
-
-## `calibracion.py` (frente 1, con frente 2 para el paso de ojos)
-
-**Aquí debe ir el código que** aprende las referencias de la persona al inicio de la sesión, en los dos pasos descritos en `docs/arquitectura.md`.
-
-- `calibrar(captura, interfaz)`: entrega un objeto `Calibracion` con:
-  - la plantilla frontal del rostro en cada nivel de la pirámide,
-  - la caja inicial del rostro,
-  - el histograma acumulado de referencia,
-  - las filas de la franja de ojos y de la franja de boca,
-  - la separación de párpados con ojos abiertos y con ojos cerrados,
-  - la separación de labios en reposo.
-
-Detalles:
-
-- La plantilla se toma del recuadro que la interfaz muestra en pantalla.
-- Las separaciones de referencia son la **mediana** de los cuadros de cada paso. Con la mediana, un parpadeo durante el paso de ojos abiertos no arruina la referencia.
-- La franja de ojos son las filas donde el perfil de gradiente más cambia entre el paso de ojos abiertos y el de ojos cerrados.
-- Si la separación abierta y la cerrada salen casi iguales, la calibración falló. Se avisa en pantalla y se repite.
-
-La calibración vive en memoria. Contiene una imagen del rostro, así que no se guarda en el repositorio.
-
-**Hecho cuando:** al terminar la calibración se muestran en pantalla la plantilla, las dos franjas marcadas y las tres separaciones.
+**Verificación.** `suavizar_binomial` contra `cv2.GaussianBlur` (diferencia de 0.00005). `especificar_histograma` con referencia uniforme contra `cv2.equalizeHist` (diferencia de 1 nivel, por redondeo). Al corregir una imagen oscurecida, la diferencia entre acumulados baja de 0.609 a 0.014.
 
 ---
 
-## `rostro.py` (frente 1)
+## `gradiente.py`
 
-**Aquí debe ir el código que** encuentra el rostro en cada cuadro a partir de dónde estaba en el anterior.
+Gradientes de Sobel (práctica 5) y la medida de bordes de los ojos.
 
-- `seguir(piramide, calibracion, caja_anterior)`: entrega `(caja, puntaje)`.
+| Función | Recibe | Entrega |
+|---|---|---|
+| `gradiente_vertical(img)` | Imagen | Derivada vertical. Responde a bordes horizontales |
+| `gradiente_horizontal(img)` | Imagen | Derivada horizontal. Responde a bordes verticales |
+| `banda_mas_oscura(img, columnas, alto_de_banda)` | Imagen, `(c0, c1)`, número de renglones | Primer renglón del grupo de renglones seguidos más oscuro |
+| `razon_de_bordes(ojo)` | Recorte de un ojo ya suavizado | Suma de bordes verticales entre suma de bordes horizontales |
+
+Los gradientes se aplican de forma separable: suavizado `(1, 2, 1)` en una dirección y diferencia `(-1, 0, 1)` en la otra.
+
+### La idea de `razon_de_bordes`
+
+Un ojo abierto muestra el iris, que es un disco oscuro. Sus lados son bordes verticales y aparecen en el gradiente horizontal. Un ojo cerrado solo tiene la línea de las pestañas, que es un borde horizontal y aparece en el gradiente vertical.
 
 Pasos:
 
-1. En el nivel más pequeño de la pirámide, calcular la banda laplaciana y buscar la plantilla con correlación normalizada, solo en una ventana de `BUSQUEDA_VENTANA_PX` alrededor de la posición anterior.
-2. Afinar la posición en el nivel siguiente con una ventana de 2 px.
-3. Convertir la posición a coordenadas del cuadro completo.
-4. Si el puntaje se mantiene bajo varios cuadros seguidos, buscar en toda la imagen del nivel más pequeño para reencontrar el rostro.
+1. Se toman las columnas centrales del recorte (`OJOS_COLUMNA_INICIAL` a `OJOS_COLUMNA_FINAL`).
+2. Se busca la banda de `OJOS_ALTO_DE_BANDA` renglones más oscura. Ahí está el iris o la línea de pestañas.
+3. Se toma esa banda con `OJOS_MARGEN_DE_BANDA` renglones extra arriba y abajo.
+4. Dentro de esa zona se suman los valores absolutos del gradiente horizontal y del vertical, y se dividen.
 
-La plantilla no se actualiza durante la sesión. Si se actualizara con cada cuadro, poco a poco dejaría de ser un rostro de frente y la caída del puntaje dejaría de significar "volteó".
+Resultado medido en el dataset de Kaggle: mediana de 0.72 en ojos abiertos y de 0.41 en ojos cerrados.
 
-**Hecho cuando:** en vivo la caja sigue la cara al moverse despacio, el puntaje baja claramente al voltear y el rostro se reencuentra en menos de un segundo al regresar.
+**Lo que se descartó.** El primer diseño medía la separación entre los picos del perfil del gradiente vertical (los bordes de los párpados). Con imágenes reales no distinguió abierto de cerrado mejor que el azar, porque la ceja, las pestañas y los pliegues del párpado producen picos propios. Decisión D28.
 
----
-
-## `geometria.py` (frente 1)
-
-**Aquí debe ir el código que** recorta el rostro y lo lleva a un tamaño fijo con mapeo inverso. Se adapta lo hecho en la práctica 3.
-
-- `normalizar_rostro(img, caja)`: entrega una imagen de `ROSTRO_ANCHO` × `ROSTRO_ALTO`.
-
-Para cada pixel de la imagen de salida se calcula de qué coordenada de la imagen original viene (escala y traslación) y se interpola entre los cuatro pixeles vecinos. Se recorre la salida y no la entrada para que no queden huecos.
-
-Las coordenadas de todos los pixeles de salida se calculan de una vez con arreglos de NumPy, sin ciclos.
-
-**Se verifica contra:** `cv2.warpAffine` con la misma transformación.
-
-**Hecho cuando:** la verificación está en `verificacion/` y el rostro normalizado se ve estable en vivo.
+**Verificación.** Contra `cv2.Sobel`, diferencia de 0.0001.
 
 ---
 
-## `gradiente.py` (frente 2)
+## `ojos.py`
 
-**Aquí debe ir el código que** mide la separación entre dos bordes horizontales dentro de una franja. Lo usan `ojos.py` y `boca.py`.
+Convierte los recortes de los ojos en una `Medicion`.
 
-- `gradiente_vertical(img)`: derivada en dirección vertical con el núcleo de Sobel, aplicada de forma separable (suavizado `[1, 2, 1]` a lo ancho y diferencia `[-1, 0, 1]` a lo alto).
-- `perfil_por_renglon(grad)`: suma del valor absoluto del gradiente a lo largo de cada renglón. Entrega un número por renglón.
-- `separacion_de_picos(perfil)`: distancia en pixeles entre los dos picos principales del perfil.
+| Función | Recibe | Entrega |
+|---|---|---|
+| `razon_de_un_ojo(ojo_gris)` | Recorte de un ojo, de 64 px de ancho | Razón de bordes |
+| `apertura_desde_razon(razon, razon_abierto, razon_cerrado)` | La razón y sus dos referencias | Apertura entre 0 y 1 |
+| `medir_ojos(ojo_izquierdo, ojo_derecho, t, razon_abierto, razon_cerrado)` | Los dos recortes, el tiempo y las referencias | `Medicion` con el promedio de las dos aperturas |
 
-Dificultad conocida: elegir "los dos picos principales" puede ser inestable cuando hay ruido o armazones de lentes. Si pasa, la alternativa es medir qué tan repartido está el perfil (la desviación estándar de las filas, pesada por el perfil) en lugar de buscar picos. Entrega un número con el mismo sentido: grande con el ojo abierto, pequeño con el ojo cerrado.
+`razon_de_un_ojo` descarta el 30% superior del recorte (la ceja), suaviza y llama a `razon_de_bordes`.
 
-**Se verifica contra:** `cv2.Sobel` para el gradiente, y una imagen sintética con dos líneas horizontales a distancia conocida para la separación.
+`apertura_desde_razon` calcula `(razon − cerrado) / (abierto − cerrado)` y recorta el resultado entre 0 y 1. Con referencias 0.74 y 0.39, una razón de 0.60 da 0.60.
 
-**Hecho cuando:** sobre imágenes de ojos abiertos y cerrados de Kaggle, las separaciones de los dos grupos se distinguen a simple vista en un histograma.
+Las referencias vienen de la calibración de la persona. Si no hay, `medir_ojos` usa las de `config.py`.
 
----
+**Evidencia.** `python -m evaluacion.por_cuadro <carpeta>` sobre los 1452 recortes de Kaggle da F1 de 0.86 y 0.84, sin calibración y con un solo umbral.
 
-## `ojos.py` (frente 2)
-
-**Aquí debe ir el código que** entrega la apertura de los ojos como `Medicion`.
-
-- `medir_ojos(rostro_normalizado, calibracion, t)`: entrega `Medicion`.
-
-Pasos:
-
-1. Recortar la franja de ojos guardada en la calibración.
-2. Suavizar y calcular la separación con `gradiente.py`.
-3. Convertir a apertura: `(separación − cerrada) / (abierta − cerrada)`, recortada entre 0 y 1.
-4. Entregar `Medicion(t, apertura, valido=True)`.
-
-Si el rostro no se encontró bien en este cuadro, `principal.py` no llama a esta función y la medición queda como no válida.
-
-Se miden los dos ojos juntos en una sola franja. Medirlos por separado es una mejora posible.
-
-**Hecho cuando:** en vivo la apertura se mantiene arriba de 0.6 con los ojos abiertos y baja de 0.2 al cerrarlos, y el F1 por cuadro está reportado en `evaluacion/`.
+**Falta.** Probarlo en video con calibración. Ajustar dónde se recortan los ojos (`OJOS_FILA_INICIAL` y `OJOS_FILA_FINAL`). Tareas T02 y T11 de `docs/tareas_pendientes.md`.
 
 ---
 
-## `boca.py` (frente 3)
+## `piramide.py`
 
-**Aquí debe ir el código que** entrega la apertura de la boca como `Medicion`.
+Pirámide gaussiana y banda laplaciana (práctica 6).
 
-- `medir_boca(rostro_normalizado, calibracion, t)`: entrega `Medicion`.
+| Función | Recibe | Entrega |
+|---|---|---|
+| `reducir(img)` | Imagen | Imagen de la mitad de ancho y alto |
+| `piramide_gaussiana(img, niveles)` | Imagen y número de niveles | Lista de imágenes, de la más grande a la más pequeña |
+| `banda_laplaciana(img)` | Imagen | La imagen menos su versión suavizada |
 
-Igual que los ojos, con la franja de boca. El valor es la separación de labios menos la de reposo, dividida entre el alto del rostro normalizado y recortada entre 0 y 1.
+`reducir` suaviza con el binomial y conserva un pixel de cada dos. Con 3 niveles y un cuadro de 640×360 salen 640×360, 320×180 y 160×90.
 
-Lo que hay que observar con los videos de guion G3: qué valores da al hablar, al sonreír y al bostezar. El umbral de `config.py` se coloca entre hablar y bostezar. La duración mínima del bostezo (D11) hace el resto.
+La banda laplaciana conserva bordes y detalles y descarta los cambios lentos de brillo. El rostro se busca sobre ella para depender poco de la iluminación.
 
-**Hecho cuando:** en vivo un bostezo supera el umbral durante más de un segundo y hablar no lo hace de forma sostenida.
+**Verificación.** `reducir` contra `cv2.pyrDown`, diferencia de 0.00003.
 
 ---
 
-## `cabeza.py` (frente 3)
+## `correlacion.py`
 
-**Aquí debe ir el código que** dice qué tan de frente está la cabeza y cuánto se movió.
+Dos formas de comparar imágenes.
 
-- `medir_cabeza(puntaje, rostro_actual, rostro_anterior, t)`: entrega `Medicion` y el desplazamiento `(dx, dy)`.
+| Función | Recibe | Entrega |
+|---|---|---|
+| `correlacion_normalizada(imagen, plantilla)` | Imagen y plantilla más pequeña | Mapa con un valor entre -1 y 1 por posición |
+| `posicion_del_maximo(mapa)` | Un mapa | `(y, x, valor)` del punto más alto |
+| `correlacion_de_fase(anterior, actual)` | Dos imágenes del mismo tamaño | `(dx, dy, pico)` |
 
-El valor de la medición es el puntaje de correlación del seguimiento, llevado al rango de 0 a 1. Cuando la persona voltea, el rostro deja de parecerse a la plantilla frontal y el valor baja.
+### Correlación normalizada
 
-La correlación de fase entre el rostro actual y el anterior da el desplazamiento de la cabeza. Sirve para dos cosas: mostrar en la interfaz hacia dónde se mueve, y distinguir un giro (hay movimiento justo antes de que caiga el puntaje) de una falla por luz (el puntaje cae sin movimiento).
+En cada posición se recorta el trozo de imagen que queda bajo la plantilla, se resta la media al trozo y a la plantilla, se multiplican pixel a pixel, se suma y se divide entre el producto de sus normas.
 
-A diferencia de ojos y boca, esta medición siempre es válida. Si el rostro no aparece, el valor es 0 (decisión D14).
+Restar las medias quita el efecto del brillo. Dividir entre las normas quita el del contraste. El valor 1 significa que el trozo es idéntico a la plantilla salvo por brillo y contraste.
 
-**Hecho cuando:** con los videos de guion G4 el valor baja del umbral durante los giros y se recupera al regresar, y el desplazamiento apunta hacia el lado correcto.
+El mapa mide `(alto de imagen − alto de plantilla + 1)` por `(ancho de imagen − ancho de plantilla + 1)`. La posición `(y, x)` corresponde a poner la esquina superior izquierda de la plantilla en ese pixel.
+
+Hay un ciclo por posición, así que conviene pasarle solo la zona donde puede estar la plantilla. Buscar en 17×17 posiciones tarda unos 3 a 5 ms. Buscar en toda la imagen de 160×90 tarda cerca de 80 ms.
+
+### Correlación de fase
+
+Mide cuánto se desplazó el contenido de `actual` respecto a `anterior`. `dx` positivo es hacia la derecha y `dy` positivo es hacia abajo. `pico` va de 0 a 1 y dice qué tan nítido fue el resultado.
+
+Pasos: multiplicar las dos imágenes por una ventana de Hanning, calcular sus transformadas de Fourier, multiplicar el conjugado de una por la otra, dividir entre la magnitud para quedarse con la fase, regresar con la transformada inversa y buscar el máximo. Un máximo en la segunda mitad del arreglo es un desplazamiento negativo.
+
+Funciona porque desplazar una imagen no cambia la magnitud de su transformada, solo su fase, y la cambia en proporción al desplazamiento.
+
+En el sistema se usa para predecir hacia dónde se movió el rostro antes de buscarlo (ver `rostro.py`).
+
+**Verificación.** La normalizada contra `cv2.matchTemplate` (diferencia de 0.00002 y mismo máximo). La de fase recupera cinco desplazamientos conocidos con error 0 y difiere 0.33 px de `cv2.phaseCorrelate`, que entrega decimales.
+
+---
+
+## `geometria.py`
+
+Recorte y cambio de tamaño con mapeo inverso (práctica 3).
+
+| Función | Recibe | Entrega |
+|---|---|---|
+| `recortar_y_escalar(img, caja, ancho_salida, alto_salida)` | Imagen, caja y tamaño deseado | La región de la caja con ese tamaño |
+| `normalizar_rostro(img, caja)` | Imagen y caja del rostro | Rostro de 128×160 |
+| `recortes_de_ojos(rostro)` | Rostro normalizado | Dos recortes de 64 px de ancho, uno por mitad |
+
+Mapeo inverso quiere decir que se recorre la imagen de salida y, para cada pixel, se calcula de qué punto de la original viene. Recorrer la original dejaría huecos. Como el punto de origen casi nunca cae sobre un pixel exacto, su valor se interpola entre los cuatro vecinos (interpolación bilineal).
+
+La transformación solo escala y traslada. Por eso la coordenada x de origen depende solo de la columna y la coordenada y solo del renglón, y se calculan una vez por columna y por renglón, sin ciclos.
+
+`recortes_de_ojos` toma las filas entre `OJOS_FILA_INICIAL` y `OJOS_FILA_FINAL` del rostro y las parte en dos mitades. Esas filas son provisionales.
+
+**Verificación.** Contra `cv2.warpAffine`, diferencia de 0.0006.
+
+**Falta.** Ajustar las filas de los ojos con caras reales (tarea T02).
+
+---
+
+## `rostro.py`
+
+Seguimiento del rostro. El rostro no se detecta: se sigue a partir de una plantilla tomada en la calibración.
+
+| Elemento | Recibe | Entrega |
+|---|---|---|
+| `recortar(img, x, y, ancho, alto)` | Imagen y región | Recorte sin cambiar de tamaño |
+| `buscar_cerca(banda, plantilla, centro_x, centro_y, ventana)` | Banda laplaciana, plantilla, centro y radio de búsqueda | `(x, y, puntaje)` del mejor lugar |
+| `SeguidorDeRostro(piramide, caja)` | Pirámide del cuadro de calibración y caja del rostro | Objeto que guarda las plantillas |
+| `SeguidorDeRostro.seguir(piramide)` | Pirámide de un cuadro nuevo | `(caja, puntaje, movimiento)` |
+
+### Qué guarda el seguidor
+
+Dos plantillas, recortadas de la banda laplaciana: una del nivel intermedio (320×180) y otra del nivel más pequeño (160×90). Usan solo el 65% superior de la caja del rostro (`PLANTILLA_FRACCION_ALTO`): frente, ojos y nariz. La boca queda fuera para que un bostezo no baje el parecido.
+
+### Qué hace `seguir` en cada cuadro
+
+1. **Predicción.** Correlación de fase entre la zona del rostro en el cuadro anterior y en el actual, en el nivel más pequeño. Si el pico es de al menos `FASE_PICO_MINIMO`, el centro de búsqueda se mueve esa cantidad.
+2. **Búsqueda gruesa.** Correlación normalizada en el nivel más pequeño, en una ventana de `BUSQUEDA_VENTANA_PX` alrededor de la predicción. De aquí sale el puntaje.
+3. **Búsqueda completa, si hace falta.** Si el puntaje quedó debajo de `CABEZA_UMBRAL_DISTRAIDO`, cada `REBUSCAR_CADA_CUADROS` cuadros se busca en toda la imagen pequeña.
+4. **Afinado.** Si se encontró, se afina la posición en el nivel intermedio con una ventana de `AFINADO_VENTANA_PX` y se actualiza la caja. Si no, la caja se queda donde estaba, para reencontrar el rostro ahí cuando la persona regrese.
+
+El puntaje es la señal de distracción: cuando la persona voltea, lo que se ve deja de parecerse a la plantilla de frente.
+
+### Limitaciones
+
+- La plantilla no cambia de tamaño. La persona debe quedarse más o menos a la misma distancia.
+- La plantilla no se actualiza durante la sesión. Si se actualizara, dejaría poco a poco de ser un rostro de frente.
+- Los ojos están dentro de la plantilla, así que cerrarlos baja el puntaje. Con la cara dibujada baja de 0.91 a 0.70. Si con una persona bajara de 0.50, un cierre de ojos se tomaría por distracción. Es el riesgo de la decisión D32 y lo primero que hay que medir con un video real (tarea T03).
+
+**Pruebas.** `pruebas/test_sistema.py`: encuentra una cara movida 12 px, alcanza una movida 48 px gracias a la predicción, y deja la caja quieta si la cara desaparece.
+
+---
+
+## `captura.py`
+
+Lee cuadros de una cámara, de un archivo o de la escena dibujada, y los entrega en grises y en el tamaño de trabajo.
+
+| Elemento | Recibe | Entrega |
+|---|---|---|
+| `a_tamano_de_trabajo(gris)` | Imagen en grises de cualquier tamaño | Imagen de 640 px de ancho, a lo más 360 de alto |
+| `Captura(fuente)` | `"0"`, `"1"`, `"escena"` o una ruta | Objeto de captura |
+| `Captura.leer()` | Nada | `(gris, t)` o `None` cuando se acaban los cuadros |
+| `Captura.cerrar()` | Nada | Libera la cámara o el archivo |
+
+Cómo se lleva al tamaño de trabajo:
+
+| Ancho de entrada | Método |
+|---|---|
+| 640 | Se deja igual |
+| 1280 | `reducir` de la pirámide |
+| Otro | `recortar_y_escalar` conservando la proporción |
+
+Si después de eso la imagen es más alta que 360 (cámaras 4:3), se conserva la franja central.
+
+La marca de tiempo depende de la fuente. Con cámara es el reloj de la computadora. Con un archivo es el número de cuadro entre los cuadros por segundo del video, para que el resultado sea el mismo sin importar la velocidad de proceso. Por eso los videos deben tener cuadros por segundo constantes (`datos/README.md`).
+
+**Falta.** Probar con cámara.
+
+---
+
+## `cabeza.py`
+
+| Función | Recibe | Entrega |
+|---|---|---|
+| `medir_cabeza(puntaje, t)` | Puntaje del seguimiento (entre -1 y 1) y tiempo | `Medicion` con el puntaje recortado entre 0 y 1 |
+
+Esta medición siempre es válida. Si el rostro no aparece, el valor es bajo y eso cuenta como distracción (decisión D14).
+
+**Falta.** Ajustar `CABEZA_UMBRAL_DISTRAIDO` y `CABEZA_UMBRAL_ATENTO` con los videos del guion G4. Distinguir un giro de una falla por luz usando el movimiento que entrega el seguidor (opcional).
+
+---
+
+## `boca.py`
+
+Apertura de la boca. **La medida no está validada con bocas reales** (decisión D31).
+
+| Función | Recibe | Entrega |
+|---|---|---|
+| `franja_de_boca(rostro)` | Rostro normalizado | Recorte de la zona de la boca |
+| `umbral_oscuro_en_reposo(rostro)` | Rostro con la boca cerrada | Nivel de gris que separa "oscuro" de "piel" |
+| `medida_de_boca(rostro, umbral_oscuro)` | Rostro y umbral | Alto de la zona oscura entre el alto del rostro |
+| `medir_boca(rostro, t, umbral_oscuro, medida_en_reposo)` | Rostro, tiempo, umbral y valor en reposo | `Medicion` |
+
+Idea: al abrir la boca aparece una zona oscura cuyo alto crece con la apertura.
+
+- El umbral es el punto medio entre lo más oscuro de la franja en reposo (percentil 2, la línea de los labios) y su nivel típico (la mediana, la piel).
+- En cada columna de la franja se cuentan los pixeles más oscuros que el umbral. Se ordenan las columnas y se toma la mediana de la cuarta parte más alta.
+- Ese alto se divide entre el alto del rostro y se le resta el valor en reposo.
+
+El rostro que recibe debe tener ya la iluminación corregida, porque el umbral es un nivel de gris fijo.
+
+**Falta.** Validarla con los videos del guion G3: qué valores da al hablar, al sonreír y al bostezar (tarea T07). Si no separa, hay que cambiar de medida, como pasó con los ojos.
